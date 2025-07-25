@@ -23,6 +23,7 @@ class MicrocalcificationGUI:
         # Variables de estado
         self.image_path = None
         self.image_loaded = None
+        self.image_loaded_original = None
         self.image_cropped = None
         self.show_overlay = True  # True = superposición, False = solo máscara
         self.optim_exposant_var = tk.DoubleVar()
@@ -35,6 +36,7 @@ class MicrocalcificationGUI:
 
         self.image_segmented = None
         self.crop_coords = []
+        self.crop_coords_interpoles = ()
 
         # Crear interfaz
         self.setup_ui()
@@ -132,6 +134,9 @@ class MicrocalcificationGUI:
 
         self.image_path = path
         self.image_loaded = load_image(path)
+        # 🔴 Sauvegarde de l’image originale avant toute modification
+        self.image_loaded_original = self.image_loaded.copy()
+
         self.display_image(self.image_loaded)
         self.crop_btn.config(state=tk.NORMAL)
         self.segment_btn.config(state=tk.DISABLED)
@@ -162,42 +167,7 @@ class MicrocalcificationGUI:
         self.canvas.create_image(480, 250, image=self.photo)
         self.img_ref = self.photo  # evitar garbage collection
 
-    def draw_square_annotation(self, x, y, r, img_original_shape, canvas_center_x, canvas_center_y, color="yellow"):
-        """
-        Trace un carré centré en (x, y) avec rayon r (donc de côté 2r),
-        à l'emplacement de l’image centrée en (canvas_center_x, canvas_center_y) sur le canvas.
-        
-        Arguments :
-        - x, y, r : coordonnées dans l’image originale
-        - img_original_shape : shape de l’image originale (hauteur, largeur)
-        - canvas_center_x, canvas_center_y : centre de l’image dans le canvas
-        - color : couleur du contour
-        """
-        img_h, img_w = img_original_shape[:2]
-
-        # Facteurs d’échelle (l’image affichée est redimensionnée en 240x240)
-        scale_x = 240 / img_w
-        scale_y = 240 / img_h
-
-        # Redimensionnement des coordonnées
-        x_scaled = x * scale_x
-        y_scaled = y * scale_y
-        r_scaled_x = r * scale_x
-        r_scaled_y = r * scale_y
-
-        # Décalage lié à la position de l’image dans le canvas
-        offset_x = canvas_center_x - 120
-        offset_y = canvas_center_y - 120
-
-        # Coordonnées finales du carré sur le canvas
-        x1 = x_scaled - r_scaled_x + offset_x
-        y1 = y_scaled - r_scaled_y + offset_y
-        x2 = x_scaled + r_scaled_x + offset_x
-        y2 = y_scaled + r_scaled_y + offset_y
-
-        # Dessin du carré
-        self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=2)
-
+    
 
     def choose_crop_mode(self):
         # Fenêtre popup de choix
@@ -225,56 +195,28 @@ class MicrocalcificationGUI:
 
     def auto_crop_from_csv(self, crop_data):
         try:
-            # Recuperar coordenadas desde el CSV (x ↔︎ y por convención interna)
-            self.y = int(crop_data['x'])  # ↔️ atención a este cambio
-            self.x = int(crop_data['y'])
-            self.r = int(crop_data['radius'])
+            # Récupérer les coordonnées depuis le CSV
+            self.x = int(crop_data['x'])  # ⚠️ CSV: colonne 'Coordinate_x'
+            self.y = int(crop_data['y'])  # ⚠️ CSV: colonne 'Coordinate_y'
+            self.r = int(crop_data['radius'])  # ⚠️ CSV: colonne 'Radius'
 
-            h, w = self.image_loaded.shape[:2]
-
-            # Mostrar una previsualización con rectángulo amarillo
-            img = self.image_loaded.copy()
             x, y, r = self.x, self.y, self.r
-            top_left = (int(y - r), int(x - r))
-            bottom_right = (int(y + r), int(x + r))
+            y = self.image_loaded_original.shape[0] - y  # Inverser Y si origine en haut à gauche
 
-            if len(img.shape) == 2:
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            else:
-                img_rgb = img.copy()
+            # Clamp pour éviter les débordements
+            xmin = max(0, x - r)
+            xmax = min(self.image_loaded_original.shape[1], x + r)
+            ymin = max(0, y - r)
+            ymax = min(self.image_loaded_original.shape[0], y + r)
 
-            cv2.rectangle(img_rgb, top_left, bottom_right, (0, 255, 255), 2)
-            cv2.imshow("Previsualización del recorte automático", img_rgb)
-            cv2.waitKey(1)
+            # Enregistrer les coordonnées du rectangle interpolées (comme dans crop_image)
+            self.crop_coords_interpoles = ((xmin, ymin), (xmax, ymax))
 
-            # Preguntar si se quiere aplicar
-            confirm = messagebox.askyesno("Confirmación", "¿Aplicar este recorte automático?")
-            cv2.destroyWindow("Previsualización del recorte automático")
+            # Recadrer l'image
+            self.image_cropped = self.image_loaded_original[ymin:ymax, xmin:xmax]
+            self.show_two_images(self.image_loaded_original, self.image_cropped)
 
-            if not confirm:
-                print("❌ Recorte cancelado por el usuario.")
-                return
-
-            # Recortar la imagen
-            self.image_cropped = self.image_loaded[x - r:x + r, y - r:y + r]
-            self.show_two_images(self.image_loaded, self.image_cropped)
-
-            # Dibujar rectángulo en el canvas Tkinter (escala)
-            canvas_size = 480
-            scale_x = canvas_size / w
-            scale_y = canvas_size / h
-
-            x_canvas1 = int((y - r) * scale_x) + 480 - canvas_size // 2
-            x_canvas2 = int((y + r) * scale_x) + 480 - canvas_size // 2
-            y_canvas1 = int((x - r) * scale_y) + 250 - canvas_size // 2
-            y_canvas2 = int((x + r) * scale_y) + 250 - canvas_size // 2
-
-            self.rect_id = self.canvas.create_rectangle(
-                x_canvas1, y_canvas1, x_canvas2, y_canvas2,
-                outline='yellow', width=2
-            )
-
-            # Aplicar segmentación
+            # Appliquer la segmentation
             self.segment_image()
 
         except Exception as e:
@@ -283,11 +225,13 @@ class MicrocalcificationGUI:
             self.crop_image()
 
 
+
     # Reiniciar todo
     def reset_all(self):
         self.image_path = None
         self.image_loaded = None
         self.image_cropped = None
+        self.image_loaded_original = None
         self.image_segmented = None
         self.crop_coords = []
         self.canvas.delete("all")
@@ -298,6 +242,7 @@ class MicrocalcificationGUI:
         self.x = 0
         self.y = 0
         self.r = 0
+        self.crop_coords_interpoles = ()
 
     # Actualizar los resultados en el cuadro de texto
     def update_results_text(self, results):
@@ -313,9 +258,10 @@ class MicrocalcificationGUI:
         self.segment_after_id = self.root.after(500, self.segment_image)
 
     def crop_image(self):
-        self.display_image(self.image_loaded)
+        self.display_image(self.image_loaded_original)
         self.crop_coords = []
         self.rect_id = None
+        
 
         image_display_size = 480
         image_top_left_x = 480 - image_display_size // 2  # = 240
@@ -362,23 +308,25 @@ class MicrocalcificationGUI:
                 y2_img = max(0, min(image_display_size - 1, y2_img))
 
                 # Redimensionner vers l'image réelle
-                scale_x = self.image_loaded.shape[1] / image_display_size
-                scale_y = self.image_loaded.shape[0] / image_display_size
+                scale_x = self.image_loaded_original.shape[1] / image_display_size
+                scale_y = self.image_loaded_original.shape[0] / image_display_size
                 xmin = int(x1_img * scale_x)
                 xmax = int(x2_img * scale_x)
                 ymin = int(y1_img * scale_y)
                 ymax = int(y2_img * scale_y)
+
+                self.crop_coords_interpoles = ((xmin, ymin), (xmax, ymax))
 
                 # Vérification que la zone n'est pas vide
                 if xmax <= xmin or ymax <= ymin:
                     print("CROP no valido.")
                     return
 
-                self.image_cropped = self.image_loaded[ymin:ymax, xmin:xmax]
+                self.image_cropped = self.image_loaded_original[ymin:ymax, xmin:xmax]
 
                 # Affiche côte-à-côte l’image originale et le crop pour debug
-                self.show_two_images(self.image_loaded, self.image_cropped)
-
+                self.show_two_images(self.image_loaded_original, self.image_cropped)
+                
                 # Lance automatiquement la segmentation et affichage des 3 images
                 self.segment_image()
 
@@ -408,8 +356,9 @@ class MicrocalcificationGUI:
                 img_disp = img
             pil_img = Image.fromarray(img_disp).resize((240, 240))
             return ImageTk.PhotoImage(pil_img)
-
+        
         photo1 = prep(self.image_loaded)
+        self.image_loaded_original = self.image_loaded.copy()
         photo2 = prep(self.img_power)
         photo3 = prep(self.seg_color_img)
         photo4 = prep(img4)
@@ -518,6 +467,56 @@ class MicrocalcificationGUI:
         # Lanza la segmentacion despues de un corto tiempo 50ms
         self.schedule_segment_image()
 
+    def colorier_pixels_sur_image_loaded(self):
+        if self.crop_coords_interpoles is None or len(self.crop_coords_interpoles) != 2:
+            print("Erreur : crop_coords invalide", self.crop_coords_interpoles)
+            return
+
+        (x1, y1), (x2, y2) = self.crop_coords_interpoles
+        h_crop, w_crop = y2 - y1, x2 - x1
+
+        # Vérification masque
+        if self.mask_segmented is None:
+            print("Erreur : masque segmenté manquant")
+            return
+
+        # Redimensionner le masque si jamais le crop a changé de taille
+        mask = self.mask_segmented
+        if mask.shape[:2] != (h_crop, w_crop):
+            print("Redimensionnement du masque pour correspondre au crop")
+            mask = cv2.resize(mask, (w_crop, h_crop), interpolation=cv2.INTER_NEAREST)
+
+        # Copier l’image originale
+        image_colored = self.image_loaded_original.copy()
+
+        # Convertir en couleur si image originale est en niveaux de gris
+        if len(image_colored.shape) == 2 or image_colored.shape[2] == 1:
+            image_colored = cv2.cvtColor(image_colored, cv2.COLOR_GRAY2BGR)
+
+        # Appliquer la couleur rouge sur les pixels où mask > 0
+        image_colored[y1:y2, x1:x2][mask > 0] = [255, 0, 0]
+
+        ### >>>> AJOUT POUR LA BOÎTE ENGLOBANTE <<<< ###
+        ys, xs = np.where(mask > 0)
+        if len(xs) > 0 and len(ys) > 0:
+            # Coordonnées de la boîte dans l’image entière (pas juste le crop)
+            x_min, x_max = x1 + np.min(xs), x1 + np.max(xs)
+            y_min, y_max = y1 + np.min(ys), y1 + np.max(ys)
+            # Ajouter un padding autour de la boîte (par exemple 5 pixels)
+            padding = 5
+            height, width = image_colored.shape[:2]
+            x_min = max(0, x_min - padding)
+            x_max = min(width - 1, x_max + padding)
+            y_min = max(0, y_min - padding)
+            y_max = min(height - 1, y_max + padding)
+
+            # Dessiner un rectangle vert (ou rouge)
+            cv2.rectangle(image_colored, (x_min, y_min), (x_max, y_max), color=(0, 255, 0), thickness=2)
+
+        # Mettre à jour l’attribut image affichée
+        self.image_loaded = image_colored
+
+            
     def segment_image(self):
         if self.image_cropped is None:
             return
@@ -546,6 +545,7 @@ class MicrocalcificationGUI:
         segmented_img = next_step(img_power, seg_color, regions, th1, th2, i_min, i_max, results, exposant)
         self.image_segmented = segmented_img
         self.mask_segmented = (segmented_img > 0).astype(np.uint8)
+        self.colorier_pixels_sur_image_loaded()
 
         # Création des images (rose seule et superposée)
         self.seg_only_img = self.create_segment_only_image(self.mask_segmented)
@@ -555,10 +555,6 @@ class MicrocalcificationGUI:
 
         
         self.show_four_images(self.image_loaded, img_power, seg_color, self.overlay_img)
-
-#####
-##### DIBUJAR RECTANGULO 4
-        self.draw_square_annotation(self.x, self.y, self.r, self.image_loaded.shape, 120, 250)
 
 
 #####
