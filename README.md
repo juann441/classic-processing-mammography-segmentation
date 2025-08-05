@@ -31,13 +31,15 @@ microcalcification-project/
 ├── data/                         # Images d’entrée
 ├── notebooks/
 │   └── main_analysis.ipynb       # Notebook principal (analyse hors interface)
+├── gui/
+│   └── app.ipynb       # Script principal de l’IHM
 ├── utils/
 │   ├── processing.py             # Pré-traitements (normalisation, filtrage)
 │   ├── plots.py                  # Fonctions d’affichage
 │   ├── blobs.py                  # Détection de blobs (LoG, DoH, etc.)
 │   ├── breast_density.py         # Segmentation Multi-Otsu, densité mammaire
 │   └── helpers.py                # Fonctions utilitaires
-├── interface.py                  # Script principal de l’IHM
+├── run_app.py                  # Lancer le programme
 ├── requirements.txt              # Dépendances Python
 ├── README.md                     # Ce fichier
 └── screenshots/
