@@ -1,6 +1,6 @@
 # 🔬 Détection automatique des microcalcifications mammaires
 
-![Interface](./interface_example.png)
+![Interface](interface_example.png)
 
 ## 🧠 Objectif
 
