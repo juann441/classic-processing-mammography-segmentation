@@ -12,6 +12,8 @@ import tkinter as tk
 from tkinter import filedialog, ttk, simpledialog, messagebox
 from PIL import Image, ImageTk
 import numpy as np
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 class MicrocalcificationGUI:
     def __init__(self):
@@ -30,6 +32,7 @@ class MicrocalcificationGUI:
         self.mean_ponderate_var = tk.DoubleVar(value=1.15)
         self.segment_after_id = None
         self.crop_info_csv = None
+        self.canvas_hist = None
         self.x = 0
         self.y = 0
         self.r = 0
@@ -110,20 +113,70 @@ class MicrocalcificationGUI:
         self.reset_sliders_btn = ttk.Button(self.frame_sliders, text="🔧 Reiniciar sliders", command=self.reset_sliders)
         self.reset_sliders_btn.grid(row=0, column=6, padx=10)
 
-        # Frame para los visuales de análisis
-        self.frame_analysis = ttk.Frame(self.root)
-        self.frame_analysis.pack(pady=10)
+        # --- Frame principale pour résultats + plot ---
+        self.frame_text = ttk.LabelFrame(self.root, text="📊 Résultats de l'analyse", padding=(5, 3))
+        self.frame_text.pack(pady=5, fill="x")
 
-        # Frame para mostrar resultados textuales
-        self.frame_text = ttk.Frame(self.root)
-        self.frame_text.pack(pady=10)
+        # --- Sous-frame gauche : tableau ---
+        self.frame_table = ttk.Frame(self.frame_text)
+        self.frame_table.grid(row=0, column=0, sticky="nsew")
 
-        self.text_results = tk.Text(self.frame_text, width=100, height=12, wrap="word", state=tk.DISABLED)
-        self.text_results.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        style = ttk.Style()
+        style.configure("Small.Treeview",
+                        font=("Segoe UI", 8),
+                        rowheight=18)
+        style.configure("Small.Treeview.Heading",
+                        font=("Segoe UI", 8, "bold"))
 
-        scrollbar = ttk.Scrollbar(self.frame_text, command=self.text_results.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.text_results.configure(yscrollcommand=scrollbar.set)
+        self.metrics_table = ttk.Treeview(
+            self.frame_table,
+            columns=("Metric", "Value"),
+            show="headings",
+            height=6,
+            style="Small.Treeview"
+        )
+        self.metrics_table.heading("Metric", text="Métrique")
+        self.metrics_table.heading("Value", text="Valeur")
+        self.metrics_table.column("Metric", width=120, anchor="center")
+        self.metrics_table.column("Value", width=60, anchor="center")
+        self.metrics_table.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(self.frame_table, orient="vertical", command=self.metrics_table.yview)
+        self.metrics_table.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        # --- Sous-frame droite : zone pour plot ---
+        self.frame_plot = ttk.Frame(self.frame_text)
+        self.frame_plot.grid(row=0, column=1, sticky="nsew", padx=5)
+
+        # pour que le frame_plot s'étende correctement
+        self.frame_text.rowconfigure(0, weight=1)
+        self.frame_text.columnconfigure(0, weight=1)
+        self.frame_text.columnconfigure(1, weight=1)
+
+        # optionnel : donner une hauteur mini au frame_plot pour qu'on voie le plot tout de suite
+        self.frame_plot.grid_propagate(False)
+        self.frame_plot.configure(width=320, height=140)
+        # Variable pour stocker le canvas matplotlib courant
+
+
+
+    def update_histogram(self, fig_hist):
+        """Affiche ou met à jour l'histogramme dans frame_plot."""
+        # Supprime l'ancien canvas si existant
+        if self.canvas_hist is not None:
+            try:
+                self.canvas_hist.get_tk_widget().destroy()
+            except Exception:
+                pass
+            self.canvas_hist = None
+
+        # Crée un nouveau canvas matplotlib
+        self.canvas_hist = FigureCanvasTkAgg(fig_hist, master=self.frame_plot)
+        self.canvas_hist.draw()
+        self.canvas_hist.get_tk_widget().pack(fill='both', expand=True)
+
+
 
     # Cargar imagen desde el explorador
     def load_image(self):
@@ -214,7 +267,7 @@ class MicrocalcificationGUI:
 
             # Recadrer l'image
             self.image_cropped = self.image_loaded_original[ymin:ymax, xmin:xmax]
-            self.show_two_images(self.image_loaded_original, self.image_cropped)
+
 
             # Appliquer la segmentation
             self.segment_image()
@@ -244,12 +297,35 @@ class MicrocalcificationGUI:
         self.r = 0
         self.crop_coords_interpoles = ()
 
-    # Actualizar los resultados en el cuadro de texto
-    def update_results_text(self, results):
-        self.text_results.config(state=tk.NORMAL)
-        self.text_results.delete(1.0, tk.END)
-        self.text_results.insert(tk.END, results)
-        self.text_results.config(state=tk.DISABLED)
+    def update_results_text(self, results, fig_hist=None):
+        """
+        Met à jour le tableau des métriques et le plot histogramme.
+        - results : dict avec les métriques
+        - fig_hist : figure matplotlib de l'histogramme (ou None)
+        """
+
+        # 1️⃣ Mise à jour du tableau
+        # Effacer l'ancien contenu
+        for row in self.metrics_table.get_children():
+            self.metrics_table.delete(row)
+
+        # Ajouter les nouvelles valeurs
+        if isinstance(results, dict):
+            for metric, value in results.items():
+                self.metrics_table.insert("", "end", values=(metric, value))
+        else:
+            # Cas si 'results' est une chaîne de texte
+            for line in str(results).strip().split("\n"):
+                if ":" in line:
+                    metric, value = line.split(":", 1)
+                    self.metrics_table.insert("", "end", values=(metric.strip(), value.strip()))
+
+        # 2️⃣ Mise à jour du plot histogramme
+        if fig_hist is not None:
+            # délègue à la méthode dédiée
+            self.update_histogram(fig_hist)
+
+
 
     # Programar segmentación con retraso
     def schedule_segment_image(self):
@@ -324,8 +400,6 @@ class MicrocalcificationGUI:
 
                 self.image_cropped = self.image_loaded_original[ymin:ymax, xmin:xmax]
 
-                # Affiche côte-à-côte l’image originale et le crop pour debug
-                self.show_two_images(self.image_loaded_original, self.image_cropped)
                 
                 # Lance automatiquement la segmentation et affichage des 3 images
                 self.segment_image()
@@ -522,7 +596,7 @@ class MicrocalcificationGUI:
             return
 
         # Multi-otsu
-        img_power, seg_color, regions, th1, th2, i_min, i_max, results, optimal_n, vis_img = multi_Otsu_4zonesv2(
+        img_power, seg_color, regions, th1, th2, i_min, i_max, results, optimal_n,fig_hist = multi_Otsu_4zonesv2(
             self.image_cropped,
             mean_ponderate=self.mean_ponderate_var.get(),
             render=True
@@ -559,17 +633,13 @@ class MicrocalcificationGUI:
 
 #####
 #####
-        self.update_results_text(results)
+        self.update_results_text(results, fig_hist)
+
 
 
         # Affichage de la visualisation sous les sliders
         if hasattr(self, 'canvas_vis'):
             self.canvas_vis.destroy()
-
-        self.canvas_vis = tk.Canvas(self.root, width=800, height=300)
-        self.canvas_vis.pack(pady=5)
-        self.canvas_vis.create_image(400, 150, image=vis_img)
-        self.vis_img_ref = vis_img  # éviter le garbage collection
 
         # Activer le bouton de toggle
         self.toggle_view_btn.config(state=tk.NORMAL)
@@ -577,17 +647,7 @@ class MicrocalcificationGUI:
         self.show_overlay = True
         self.toggle_view_btn.config(text="🎨 Mask view")  
 
-    def show_two_images(self, img1, img2):
-        def prep(img):
-            return ImageTk.PhotoImage(Image.fromarray((img * 255).astype(np.uint8)).resize((480, 480)))
 
-        photo1 = prep(img1)
-        photo2 = prep(img2)
-
-        self.canvas.delete("all")
-        self.canvas.create_image(240, 250, image=photo1)
-        self.canvas.create_image(720, 250, image=photo2)
-        self.img_refs = [photo1, photo2]
         
 
     def show_four_images(self, img1, img_power, img_otsu_color, img_overlay):
