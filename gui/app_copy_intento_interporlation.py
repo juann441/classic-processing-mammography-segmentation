@@ -9,13 +9,10 @@ import os
 
 # Importación de bibliotecas estándar
 import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
+from tkinter import filedialog, ttk, simpledialog, messagebox
 from PIL import Image, ImageTk
 import numpy as np
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import csv
-
-
+from tkinter import Toplevel
 
 class MicrocalcificationGUI:
     def __init__(self):
@@ -27,22 +24,21 @@ class MicrocalcificationGUI:
         # Variables de estado
         self.image_path = None
         self.image_loaded = None
-        self.image_loaded_original = None
         self.image_cropped = None
         self.show_overlay = True  # True = superposición, False = solo máscara
         self.optim_exposant_var = tk.DoubleVar()
         self.mean_ponderate_var = tk.DoubleVar(value=1.15)
         self.segment_after_id = None
         self.crop_info_csv = None
-        self.canvas_hist = None
         self.x = 0
         self.y = 0
         self.r = 0
-        self.results_csv = None
+
+
 
         self.image_segmented = None
-        self.crop_coords = []
-        self.crop_coords_interpoles = ()
+        self.crop_coords = None
+        self.crop_coords_interpoles = None
 
         # Crear interfaz
         self.setup_ui()
@@ -77,14 +73,6 @@ class MicrocalcificationGUI:
         self.save_btn = ttk.Button(self.frame_top, text="💾 Guardar imagen", command=self.save_image)
         self.save_btn.grid(row=0, column=5, padx=5)
 
-        # Botón  CSV
-        self.export_btn = ttk.Button(self.frame_top, text="📊 Exporter CSV", command=self.export_csv)
-        self.export_btn.grid(row=0, column=6, padx=5)
-
-        # Botón para salir
-        quit_btn = tk.Button(self.frame_top, text="❌ Quitter", bg="red", fg="white", command=self.force_quit)
-        quit_btn.grid(row=0, column=7, padx=5)
-
         # Canvas principal para mostrar imágenes
         self.canvas = tk.Canvas(self.root, width=960, height=500, bg='gray')
         self.canvas.pack()
@@ -112,7 +100,7 @@ class MicrocalcificationGUI:
         self.mean_label.grid(row=0, column=3, padx=5)
 
         self.mean_slider = ttk.Scale(
-            self.frame_sliders, from_=1.20, to=1.05, variable=self.mean_ponderate_var,
+            self.frame_sliders, from_=1.05, to=1.20, variable=self.mean_ponderate_var,
             orient=tk.HORIZONTAL, command=self.on_mean_slider_change)
         self.mean_slider.grid(row=0, column=4, padx=5)
 
@@ -124,99 +112,12 @@ class MicrocalcificationGUI:
         self.reset_sliders_btn = ttk.Button(self.frame_sliders, text="🔧 Reiniciar sliders", command=self.reset_sliders)
         self.reset_sliders_btn.grid(row=0, column=6, padx=10)
 
-        # --- Frame principale pour résultats + plot ---
-        self.frame_text = ttk.LabelFrame(self.root, text="📊 Résultats de l'analyse", padding=(5, 3))
-        self.frame_text.pack(pady=5, fill="x")
+        # Frame para los visuales de análisis
+        self.frame_analysis = ttk.Frame(self.root)
+        self.frame_analysis.pack(pady=10)
 
-        # --- Sous-frame gauche : tableau ---
-        self.frame_table = ttk.Frame(self.frame_text)
-        self.frame_table.grid(row=0, column=0, sticky="nsew")
-
-        style = ttk.Style()
-        style.configure("Small.Treeview",
-                        font=("Segoe UI", 8),
-                        rowheight=18)
-        style.configure("Small.Treeview.Heading",
-                        font=("Segoe UI", 8, "bold"))
-
-        self.metrics_table = ttk.Treeview(
-            self.frame_table,
-            columns=("Metric", "Value"),
-            show="headings",
-            height=6,
-            style="Small.Treeview"
-        )
-        self.metrics_table.heading("Metric", text="Métrique")
-        self.metrics_table.heading("Value", text="Valeur")
-        self.metrics_table.column("Metric", width=120, anchor="center")
-        self.metrics_table.column("Value", width=60, anchor="center")
-        self.metrics_table.pack(side="left", fill="both", expand=True)
-
-        scrollbar = ttk.Scrollbar(self.frame_table, orient="vertical", command=self.metrics_table.yview)
-        self.metrics_table.configure(yscroll=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-
-        # --- Sous-frame droite : zone pour plot ---
-        self.frame_plot = ttk.Frame(self.frame_text)
-        self.frame_plot.grid(row=0, column=1, sticky="nsew", padx=5)
-
-        # pour que le frame_plot s'étende correctement
-        self.frame_text.rowconfigure(0, weight=1)
-        self.frame_text.columnconfigure(0, weight=1)
-        self.frame_text.columnconfigure(1, weight=1)
-
-        # optionnel : donner une hauteur mini au frame_plot pour qu'on voie le plot tout de suite
-        self.frame_plot.grid_propagate(False)
-        self.frame_plot.configure(width=320, height=140)
-        # Variable pour stocker le canvas matplotlib courant
-
-
-    def force_quit(self):
-        """Ferme complètement l'application."""
-        print("Cerrando interfaz...")
-        self.root.destroy()
-        os._exit(0)
-    
-    def export_csv(self):
-        """Export des résultats dans un fichier CSV."""
-        if not self.results_csv:
-            messagebox.showwarning("Avertissement", "Aucun résultat à exporter.")
-            return
-
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            title="Guardar resultados"
-        )
-        if not file_path:
-            return  # annulation
-
-        try:
-            with open(file_path, mode="w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Métrica", "Valor"])
-                for key, value in self.results_csv.items():
-                    writer.writerow([key, value])
-
-            messagebox.showinfo("Succès", f"Résultats sauvegardés dans {file_path}")
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible de sauvegarder : {e}")
-
-    def update_histogram(self, fig_hist):
-        """Affiche ou met à jour l'histogramme dans frame_plot."""
-        # Supprime l'ancien canvas si existant
-        if self.canvas_hist is not None:
-            try:
-                self.canvas_hist.get_tk_widget().destroy()
-            except Exception:
-                pass
-            self.canvas_hist = None
-
-        # Crée un nouveau canvas matplotlib
-        self.canvas_hist = FigureCanvasTkAgg(fig_hist, master=self.frame_plot)
-        self.canvas_hist.draw()
-        self.canvas_hist.get_tk_widget().pack(fill='both', expand=True)
-
+        self.metrics_frame = tk.Frame(self.root)
+        self.metrics_frame.pack(pady=1)
 
 
     # Cargar imagen desde el explorador
@@ -228,9 +129,6 @@ class MicrocalcificationGUI:
 
         self.image_path = path
         self.image_loaded = load_image(path)
-        # 🔴 Sauvegarde de l’image originale avant toute modification
-        self.image_loaded_original = self.image_loaded.copy()
-
         self.display_image(self.image_loaded)
         self.crop_btn.config(state=tk.NORMAL)
         self.segment_btn.config(state=tk.DISABLED)
@@ -261,7 +159,41 @@ class MicrocalcificationGUI:
         self.canvas.create_image(480, 250, image=self.photo)
         self.img_ref = self.photo  # evitar garbage collection
 
-    
+    def draw_square_annotation(self, x, y, r, img_original_shape, canvas_center_x, canvas_center_y, color="yellow"):
+        """
+        Trace un carré centré en (x, y) avec rayon r (donc de côté 2r),
+        à l'emplacement de l’image centrée en (canvas_center_x, canvas_center_y) sur le canvas.
+        
+        Arguments :
+        - x, y, r : coordonnées dans l’image originale
+        - img_original_shape : shape de l’image originale (hauteur, largeur)
+        - canvas_center_x, canvas_center_y : centre de l’image dans le canvas
+        - color : couleur du contour
+        """
+        img_h, img_w = img_original_shape[:2]
+
+        # Facteurs d’échelle (l’image affichée est redimensionnée en 240x240)
+        scale_x = 240 / img_w
+        scale_y = 240 / img_h
+
+        # Redimensionnement des coordonnées
+        x_scaled = x * scale_x
+        y_scaled = y * scale_y
+        r_scaled_x = r * scale_x
+        r_scaled_y = r * scale_y
+
+        # Décalage lié à la position de l’image dans le canvas
+        offset_x = canvas_center_x - 120
+        offset_y = canvas_center_y - 120
+
+        # Coordonnées finales du carré sur le canvas
+        x1 = x_scaled - r_scaled_x + offset_x
+        y1 = y_scaled - r_scaled_y + offset_y
+        x2 = x_scaled + r_scaled_x + offset_x
+        y2 = y_scaled + r_scaled_y + offset_y
+
+        # Dessin du carré
+        self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=2)
 
     def choose_crop_mode(self):
         # Fenêtre popup de choix
@@ -289,29 +221,72 @@ class MicrocalcificationGUI:
 
     def auto_crop_from_csv(self, crop_data):
         try:
-            # Récupérer les coordonnées depuis le CSV
-            self.x = int(crop_data['x'])  # ⚠️ CSV: colonne 'Coordinate_x'
-            self.y = int(crop_data['y'])  # ⚠️ CSV: colonne 'Coordinate_y'
-            self.r = int(crop_data['radius'])  # ⚠️ CSV: colonne 'Radius'
+            # Lire les coordonnées depuis le CSV
+            self.y = int(crop_data['x'])  # ↔️ attention : x = colonne
+            self.x = int(crop_data['y'])  # ↔️ y = ligne
+            self.r = int(crop_data['radius'])
 
+            h, w = self.image_loaded.shape[:2]
             x, y, r = self.x, self.y, self.r
-            y = self.image_loaded_original.shape[0] - y  # Inverser Y si origine en haut à gauche
 
-            # Clamp pour éviter les débordements
-            xmin = max(0, x - r)
-            xmax = min(self.image_loaded_original.shape[1], x + r)
-            ymin = max(0, y - r)
-            ymax = min(self.image_loaded_original.shape[0], y + r)
+            # Préparer image avec rectangle jaune
+            img_preview = self.image_loaded.copy()
+            if img_preview.dtype == np.float32 or img_preview.dtype == np.float64:
+                img_preview = np.clip(img_preview * 255, 0, 255).astype(np.uint8)
+            top_left = (int(y - r), int(x - r))
+            bottom_right = (int(y + r), int(x + r))
 
-            # Enregistrer les coordonnées du rectangle interpolées (comme dans crop_image)
-            self.crop_coords_interpoles = ((xmin, ymin), (xmax, ymax))
+            if len(img_preview.shape) == 2:
+                img_preview = cv2.cvtColor(img_preview, cv2.COLOR_GRAY2RGB)
 
-            # Recadrer l'image
-            self.image_cropped = self.image_loaded_original[ymin:ymax, xmin:xmax]
+            img_preview = cv2.rectangle(img_preview, top_left, bottom_right, (0, 255, 255), 2)
+            img_rgb = cv2.cvtColor(img_preview, cv2.COLOR_BGR2RGB)
+            img_pil = Image.fromarray(img_rgb)
+            img_tk = ImageTk.PhotoImage(img_pil.resize((300, 300)))  # redimensionnée
 
+            # Créer une nouvelle fenêtre Tkinter
+            preview_win = tk.Toplevel(self.root)
+            preview_win.title("Prévisualisation du recadrage automatique")
 
-            # Appliquer la segmentation
-            self.segment_image()
+            label_img = tk.Label(preview_win, image=img_tk)
+            label_img.image = img_tk  # garder la référence
+            label_img.pack(pady=10)
+
+            # Fonction si l'utilisateur valide
+            def confirmer_crop():
+                self.image_cropped = self.image_loaded[x - r:x + r, y - r:y + r]
+                self.show_two_images(self.image_loaded, self.image_cropped)
+
+                # Affichage du rectangle sur le canvas principal
+                canvas_size = 480
+                scale_x = canvas_size / w
+                scale_y = canvas_size / h
+
+                x_canvas1 = int((y - r) * scale_x) + 480 - canvas_size // 2
+                x_canvas2 = int((y + r) * scale_x) + 480 - canvas_size // 2
+                y_canvas1 = int((x - r) * scale_y) + 250 - canvas_size // 2
+                y_canvas2 = int((x + r) * scale_y) + 250 - canvas_size // 2
+
+                self.rect_id = self.canvas.create_rectangle(
+                    x_canvas1, y_canvas1, x_canvas2, y_canvas2,
+                    outline='yellow', width=2
+                )
+
+                preview_win.destroy()
+                self.segment_image()
+
+            def annuler_crop():
+                print("❌ Recadrage annulé par l'utilisateur.")
+                preview_win.destroy()
+
+            # Boutons Oui / Non
+            frame_btn = tk.Frame(preview_win)
+            frame_btn.pack(pady=10)
+
+            btn_oui = tk.Button(frame_btn, text="Oui", command=confirmer_crop, bg="green", fg="white", width=10)
+            btn_non = tk.Button(frame_btn, text="Non", command=annuler_crop, bg="red", fg="white", width=10)
+            btn_oui.pack(side=tk.LEFT, padx=20)
+            btn_non.pack(side=tk.RIGHT, padx=20)
 
         except Exception as e:
             print(f"[Erreur] Recadrage auto échoué : {e}")
@@ -325,9 +300,8 @@ class MicrocalcificationGUI:
         self.image_path = None
         self.image_loaded = None
         self.image_cropped = None
-        self.image_loaded_original = None
         self.image_segmented = None
-        self.crop_coords = []
+        self.crop_coords = None
         self.canvas.delete("all")
         self.crop_btn.config(state=tk.DISABLED)
         self.segment_btn.config(state=tk.DISABLED)
@@ -336,36 +310,6 @@ class MicrocalcificationGUI:
         self.x = 0
         self.y = 0
         self.r = 0
-        self.crop_coords_interpoles = ()
-        self.results_csv = None
-
-    def update_results_text(self, results, fig_hist=None):
-        """
-        Met à jour le tableau des métriques et le plot histogramme.
-        - results : dict avec les métriques
-        - fig_hist : figure matplotlib de l'histogramme (ou None)
-        """
-
-        # 1️⃣ Mise à jour du tableau
-        # Effacer l'ancien contenu
-        for row in self.metrics_table.get_children():
-            self.metrics_table.delete(row)
-
-        # Ajouter les nouvelles valeurs
-        if isinstance(results, dict):
-            for metric, value in results.items():
-                self.metrics_table.insert("", "end", values=(metric, value))
-        else:
-            # Cas si 'results' est une chaîne de texte
-            for line in str(results).strip().split("\n"):
-                if ":" in line:
-                    metric, value = line.split(":", 1)
-                    self.metrics_table.insert("", "end", values=(metric.strip(), value.strip()))
-
-        # 2️⃣ Mise à jour du plot histogramme
-        if fig_hist is not None:
-            # délègue à la méthode dédiée
-            self.update_histogram(fig_hist)
 
 
 
@@ -376,10 +320,9 @@ class MicrocalcificationGUI:
         self.segment_after_id = self.root.after(500, self.segment_image)
 
     def crop_image(self):
-        self.display_image(self.image_loaded_original)
-        self.crop_coords = []
+        self.display_image(self.image_loaded)
+        self.crop_coords = None
         self.rect_id = None
-        
 
         image_display_size = 480
         image_top_left_x = 480 - image_display_size // 2  # = 240
@@ -393,7 +336,7 @@ class MicrocalcificationGUI:
 
         def on_press(event):
             x, y = event.x, event.y
-            self.crop_coords = [(x, y)]
+            self.crop_coords = (x, y)
             if self.rect_id:
                 self.canvas.delete(self.rect_id)
 
@@ -426,8 +369,8 @@ class MicrocalcificationGUI:
                 y2_img = max(0, min(image_display_size - 1, y2_img))
 
                 # Redimensionner vers l'image réelle
-                scale_x = self.image_loaded_original.shape[1] / image_display_size
-                scale_y = self.image_loaded_original.shape[0] / image_display_size
+                scale_x = self.image_loaded.shape[1] / image_display_size
+                scale_y = self.image_loaded.shape[0] / image_display_size
                 xmin = int(x1_img * scale_x)
                 xmax = int(x2_img * scale_x)
                 ymin = int(y1_img * scale_y)
@@ -440,9 +383,11 @@ class MicrocalcificationGUI:
                     print("CROP no valido.")
                     return
 
-                self.image_cropped = self.image_loaded_original[ymin:ymax, xmin:xmax]
+                self.image_cropped = self.image_loaded[ymin:ymax, xmin:xmax]
 
-                
+                # Affiche côte-à-côte l’image originale et le crop pour debug
+                self.show_two_images(self.image_loaded, self.image_cropped)
+
                 # Lance automatiquement la segmentation et affichage des 3 images
                 self.segment_image()
 
@@ -472,9 +417,8 @@ class MicrocalcificationGUI:
                 img_disp = img
             pil_img = Image.fromarray(img_disp).resize((240, 240))
             return ImageTk.PhotoImage(pil_img)
-        
+
         photo1 = prep(self.image_loaded)
-        self.image_loaded_original = self.image_loaded.copy()
         photo2 = prep(self.img_power)
         photo3 = prep(self.seg_color_img)
         photo4 = prep(img4)
@@ -535,6 +479,63 @@ class MicrocalcificationGUI:
         except ValueError:
             print("Valor no valido para mean_ponderate")
 
+    def colorier_pixels_sur_image_loaded(self):
+        if self.crop_coords is None or len(self.crop_coords) != 2:
+            print("Erreur : crop_coords invalide", self.crop_coords)
+            return
+
+        (x1, y1), (x2, y2) = self.crop_coords_interpoles
+        h_crop, w_crop = y2 - y1, x2 - x1
+
+        # Vérification masque
+        if self.mask_segmented is None:
+            print("Erreur : masque segmenté manquant")
+            return
+
+        # Redimensionner le masque si jamais le crop a changé de taille
+        mask = self.mask_segmented
+        if mask.shape[:2] != (h_crop, w_crop):
+            print("Redimensionnement du masque pour correspondre au crop")
+            mask = cv2.resize(mask, (w_crop, h_crop), interpolation=cv2.INTER_NEAREST)
+
+        # Copier l’image originale
+        image_colored = self.image_loaded.copy()
+
+        # Convertir en couleur si image originale est en niveaux de gris
+        if len(image_colored.shape) == 2 or image_colored.shape[2] == 1:
+            image_colored = cv2.cvtColor(image_colored, cv2.COLOR_GRAY2BGR)
+
+        # Appliquer la couleur rouge sur les pixels où mask == 1
+        image_colored[y1:y2, x1:x2][mask > 0] = [255, 0, 0]
+
+        # Sauvegarde l'image coloriée dans un nouvel attribut
+        self.image_loaded = image_colored
+
+
+
+    def display_metrics(self, metrics_dict):
+        """
+        Affiche les métriques dans un tableau propre sous forme de labels Tkinter.
+        Les anciennes métriques sont d'abord supprimées si elles existent.
+        """
+        # Nettoyage ancien contenu
+        for widget in self.metrics_frame.winfo_children():
+            widget.destroy()
+
+        # Titre
+        tk.Label(self.metrics_frame, text="Résumé des métriques", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=(5, 10))
+
+        # Affichage des métriques ligne par ligne
+        for i, (key, value) in enumerate(metrics_dict.items(), start=1):
+            # Couleur conditionnelle pour les métriques spécifiques
+            color = "black"
+            if "PL" in key and value < 0.8:
+                color = "red"
+            elif "PL" in key and value >= 0.8:
+                color = "green"
+
+            tk.Label(self.metrics_frame, text=key + " :", anchor="w", width=20, font=("Courier", 10)).grid(row=i, column=0, sticky="w", padx=5, pady=2)
+            tk.Label(self.metrics_frame, text=f"{value:.3f}", fg=color, anchor="e", font=("Courier", 10)).grid(row=i, column=1, sticky="e", padx=5, pady=2)
 
 
     def create_segment_only_image(self, mask):
@@ -583,62 +584,12 @@ class MicrocalcificationGUI:
         # Lanza la segmentacion despues de un corto tiempo 50ms
         self.schedule_segment_image()
 
-    def colorier_pixels_sur_image_loaded(self):
-        if self.crop_coords_interpoles is None or len(self.crop_coords_interpoles) != 2:
-            print("Erreur : crop_coords invalide", self.crop_coords_interpoles)
-            return
-
-        (x1, y1), (x2, y2) = self.crop_coords_interpoles
-        h_crop, w_crop = y2 - y1, x2 - x1
-
-        # Vérification masque
-        if self.mask_segmented is None:
-            print("Erreur : masque segmenté manquant")
-            return
-
-        # Redimensionner le masque si jamais le crop a changé de taille
-        mask = self.mask_segmented
-        if mask.shape[:2] != (h_crop, w_crop):
-            print("Redimensionnement du masque pour correspondre au crop")
-            mask = cv2.resize(mask, (w_crop, h_crop), interpolation=cv2.INTER_NEAREST)
-
-        # Copier l’image originale
-        image_colored = self.image_loaded_original.copy()
-
-        # Convertir en couleur si image originale est en niveaux de gris
-        if len(image_colored.shape) == 2 or image_colored.shape[2] == 1:
-            image_colored = cv2.cvtColor(image_colored, cv2.COLOR_GRAY2BGR)
-
-        # Appliquer la couleur rouge sur les pixels où mask > 0
-        image_colored[y1:y2, x1:x2][mask > 0] = [255, 0, 0]
-
-        ### >>>> AJOUT POUR LA BOÎTE ENGLOBANTE <<<< ###
-        ys, xs = np.where(mask > 0)
-        if len(xs) > 0 and len(ys) > 0:
-            # Coordonnées de la boîte dans l’image entière (pas juste le crop)
-            x_min, x_max = x1 + np.min(xs), x1 + np.max(xs)
-            y_min, y_max = y1 + np.min(ys), y1 + np.max(ys)
-            # Ajouter un padding autour de la boîte (par exemple 5 pixels)
-            padding = 5
-            height, width = image_colored.shape[:2]
-            x_min = max(0, x_min - padding)
-            x_max = min(width - 1, x_max + padding)
-            y_min = max(0, y_min - padding)
-            y_max = min(height - 1, y_max + padding)
-
-            # Dessiner un rectangle vert (ou rouge)
-            cv2.rectangle(image_colored, (x_min, y_min), (x_max, y_max), color=(0, 255, 0), thickness=2)
-
-        # Mettre à jour l’attribut image affichée
-        self.image_loaded = image_colored
-
-            
     def segment_image(self):
         if self.image_cropped is None:
             return
 
         # Multi-otsu
-        img_power, seg_color, regions, th1, th2, i_min, i_max, results, optimal_n,fig_hist = multi_Otsu_4zonesv2(
+        img_power, seg_color, regions, th1, th2, i_min, i_max, results, optimal_n, vis_img = multi_Otsu_4zonesv2(
             self.image_cropped,
             mean_ponderate=self.mean_ponderate_var.get(),
             render=True
@@ -672,11 +623,14 @@ class MicrocalcificationGUI:
         
         self.show_four_images(self.image_loaded, img_power, seg_color, self.overlay_img)
 
+#####
+##### DIBUJAR RECTANGULO 4
+        self.draw_square_annotation(self.x, self.y, self.r, self.image_loaded.shape, 120, 250)
+
 
 #####
 #####
-        self.update_results_text(results, fig_hist)
-        self.results_csv = results
+        self.display_metrics(results)
 
 
 
@@ -684,13 +638,28 @@ class MicrocalcificationGUI:
         if hasattr(self, 'canvas_vis'):
             self.canvas_vis.destroy()
 
+        self.canvas_vis = tk.Canvas(self.root, width=800, height=300)
+        self.canvas_vis.pack(pady=5)
+        self.canvas_vis.create_image(400, 150, image=vis_img)
+        self.vis_img_ref = vis_img  # éviter le garbage collection
+
         # Activer le bouton de toggle
         self.toggle_view_btn.config(state=tk.NORMAL)
         # Appelé à la fin de segment_image()
         self.show_overlay = True
         self.toggle_view_btn.config(text="🎨 Mask view")  
 
+    def show_two_images(self, img1, img2):
+        def prep(img):
+            return ImageTk.PhotoImage(Image.fromarray((img * 255).astype(np.uint8)).resize((480, 480)))
 
+        photo1 = prep(img1)
+        photo2 = prep(img2)
+
+        self.canvas.delete("all")
+        self.canvas.create_image(240, 250, image=photo1)
+        self.canvas.create_image(720, 250, image=photo2)
+        self.img_refs = [photo1, photo2]
         
 
     def show_four_images(self, img1, img_power, img_otsu_color, img_overlay):

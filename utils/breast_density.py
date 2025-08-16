@@ -59,7 +59,7 @@ def multi_Otsu_4zonesv2(img_power, dpi=100, mean_ponderate=1.15, render=False):
     fig_hist = None
     if render:
         fig_hist, ax_hist = plt.subplots(figsize=(2.5, 2), dpi=100)
-        ax_hist.hist(img_power.ravel(), bins=30, color="skyblue", edgecolor="black")
+        ax_hist.hist(img_power.ravel(), bins=60, color="skyblue", edgecolor="black")
         ax_hist.set_title("Intensity Histogram", fontsize=8)
         ax_hist.tick_params(axis="both", labelsize=6)
 
